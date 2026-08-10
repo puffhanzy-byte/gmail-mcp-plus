@@ -1,0 +1,73 @@
+{
+	"name": "gmail-mcp-plus",
+	"version": "0.3.0",
+	"private": true,
+	"type": "module",
+	"description": "Multi-account Gmail + Calendar on a Cloudflare Worker you deploy yourself: search across every account at once, account aliases, send, reply-all, forward, attachments, drafts, labels, filters, one-click unsubscribe, and calendar events, over MCP",
+	"license": "MIT",
+	"author": "Ruben Seoane",
+	"homepage": "https://github.com/BowTiedSwan/gmail-mcp-plus#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/BowTiedSwan/gmail-mcp-plus.git"
+	},
+	"bugs": {
+		"url": "https://github.com/BowTiedSwan/gmail-mcp-plus/issues"
+	},
+	"keywords": [
+		"mcp",
+		"model-context-protocol",
+		"mcp-server",
+		"gmail",
+		"email",
+		"google",
+		"cloudflare-workers",
+		"oauth",
+		"calendar",
+		"filters",
+		"unsubscribe",
+		"multi-account"
+	],
+	"mcpName": "io.github.BowTiedSwan/gmail-mcp-plus",
+	"scripts": {
+		"dev": "wrangler dev",
+		"deploy": "wrangler deploy",
+		"check": "biome check src test && tsc --noEmit",
+		"fix": "biome check --write src test",
+		"test": "bun test",
+		"types": "wrangler types",
+		"setup": "bun run scripts/setup.ts",
+		"assets": "bun run scripts/render-assets.ts",
+		"check:render": "python3 scripts/check-render.py",
+		"check:counts": "python3 scripts/check-counts.py"
+	},
+	"cloudflare": {
+		"bindings": {
+			"GOOGLE_CLIENT_ID": {
+				"description": "Client id of a Google OAuth 2.0 Web application client, from https://console.cloud.google.com/apis/credentials with the Gmail API enabled."
+			},
+			"GOOGLE_CLIENT_SECRET": {
+				"description": "Client secret of that same Google OAuth client."
+			},
+			"COOKIE_ENCRYPTION_KEY": {
+				"description": "Random 32 bytes as hex, from `openssl rand -hex 32`. It signs the approval cookie the sign-in flow sets."
+			},
+			"ALLOWED_EMAILS": {
+				"description": "Who may sign in, checked against the address Google reports as verified: a comma-separated list, *@your-domain.com, or * for any Google account. Empty means nobody."
+			}
+		}
+	},
+	"dependencies": {
+		"@cloudflare/workers-oauth-provider": "^0.8.1",
+		"@modelcontextprotocol/sdk": "^1.10.2",
+		"agents": "^0.17.1",
+		"hono": "^4.12.27",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.5",
+		"@types/bun": "^1.3.14",
+		"typescript": "^5.5.2",
+		"wrangler": "^4.90.0"
+	}
+}

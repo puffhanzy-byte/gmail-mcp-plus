@@ -1,0 +1,84 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "gmail-mcp-plus",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-07-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"migrations": [
+		{
+			"new_sqlite_classes": ["GmailMCP"],
+			"tag": "v1"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "GmailMCP",
+				"name": "MCP_OBJECT"
+			}
+		]
+	},
+	// No id: every OAuth grant and token lives in this namespace, and each
+	// deployment needs its own. `bun run setup` records the id it creates or
+	// reuses in wrangler.local.jsonc; a deploy that finds neither has one
+	// provisioned on the account it uploads to.
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV"
+		}
+	],
+	"rules": [
+		{ "type": "Text", "globs": ["**/*.html"] }
+	],
+	"vars": {
+		// How many distinct Google accounts may ever complete sign-in. Raise it
+		// for a shared deployment; Google caps unverified apps at 100 users.
+		"MAX_ACCOUNTS": "25",
+		// Mail filter tools. Adds the gmail.settings.basic scope to sign-in;
+		// forwarding actions stay excluded whatever this says.
+		"ENABLE_FILTERS": "true",
+		// Calendar tools. Adds calendar.events and calendarlist.readonly scopes.
+		"ENABLE_CALENDAR": "true",
+		// search_all_accounts and a full list_accounts. Stores each account's
+		// refresh token (encrypted) in the registry so one session may search
+		// every connected mailbox — right for one person's accounts, wrong for a
+		// deployment shared between people who shouldn't read each other's mail.
+		// Forced off while ALLOWED_EMAILS is "*". Scope changes need a reconnect.
+		"ENABLE_CROSS_ACCOUNT": "true"
+	},
+	"unsafe": {
+		"bindings": [
+			{
+				"name": "RATE_LIMITER",
+				"type": "ratelimit",
+				"namespace_id": "4207",
+				// Gmail calls allowed per account, counted across all its sessions.
+				// The binding reads these at build time — limit() takes only a key —
+				// so this is where the ceiling is set. The namespace is private to
+				// this Worker: another one sharing the number would share the counters.
+				"simple": { "limit": 120, "period": 60 }
+			},
+			{
+				"name": "REGISTER_LIMITER",
+				"type": "ratelimit",
+				"namespace_id": "4208",
+				// Client registration is open to anyone with the URL and writes a
+				// KV entry each time. A client registers once and then keeps its
+				// id, so a caller asking this often is not one.
+				"simple": { "limit": 10, "period": 60 }
+			}
+		]
+	},
+	// The local redirect URI is registered with Google by hand, so the port has
+	// to be the same every run — wrangler otherwise starts at 8787 and moves on
+	// to another port whenever that one is taken.
+	"dev": {
+		"port": 8788
+	},
+	"observability": {
+		"enabled": true
+	}
+	// A deployment answers on workers.dev unless it is given a custom domain,
+	// which `bun run setup` writes into wrangler.local.jsonc as a route. Google
+	// needs the redirect URI to match whichever host ends up serving /callback.
+}

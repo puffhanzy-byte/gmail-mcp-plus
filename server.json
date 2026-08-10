@@ -1,0 +1,11 @@
+{
+	"$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+	"name": "io.github.BowTiedSwan/gmail-mcp-plus",
+	"description": "Multi-account Gmail + Calendar on a Cloudflare Worker you deploy yourself: cross-account search, send, reply, filters, unsubscribe, events",
+	"version": "0.3.0",
+	"websiteUrl": "https://github.com/BowTiedSwan/gmail-mcp-plus#readme",
+	"repository": {
+		"url": "https://github.com/BowTiedSwan/gmail-mcp-plus",
+		"source": "github"
+	}
+}
