@@ -75,20 +75,163 @@ bun run setup
 
 ### 3 · Connect a client
 
-Leave the client ID and secret fields empty — MCP clients register themselves.
+Leave the client ID and secret fields empty — MCP clients register themselves via Dynamic Client Registration.
 
 ```sh
-claude mcp add --transport http gmail-personal https://<your-host>/mcp
-claude mcp add --transport http gmail-work     https://<your-host>/mcp/work
+claude mcp add --transport http gmail https://<your-host>/mcp
 ```
 
-Run `/mcp` in Claude Code to sign each connection in to its Google account. In claude.ai it is **Settings → Connectors → Add custom connector** with the same URL. Any single-segment label works after `/mcp/`, which is how one deployment serves several mailboxes to clients that reject two servers sharing a URL.
+Run `/mcp` in Claude Code to sign in. In claude.ai it is **Settings → Connectors → Add custom connector** with the same URL. Any single-segment label works after `/mcp/` (for example `/mcp/work`, `/mcp/personal`) when a client rejects two servers that share a URL.
 
-Once two accounts are connected, give them names and search them together:
+Once two or more Google accounts are connected to the Worker, give them names and search them together:
 
 > `set_account_alias("work")` · `list_accounts` · `search_all_accounts("invoice newer_than:7d")`
 
-Your deployment serves this guide at `https://<your-host>/`.
+Your deployment serves this guide at `https://<your-host>/`. **Agents configuring multiple MCP clients** should follow [Agent onboarding](#agent-onboarding) instead of repeating Google linking in every client.
+
+---
+
+## Agent onboarding
+
+This section is for coding agents (Claude Code, OpenCode, omp, Cursor, etc.) that need to wire a deployed Worker into one or more local MCP clients **without rediscovering the traps below**.
+
+### Mental model (do not skip)
+
+Two OAuth layers meet in one Worker:
+
+1. **Google ↔ Worker** — each `/mcp/<label>` path registers **one Google mailbox** in the Worker's account registry (encrypted in your Cloudflare KV). This is what enables `list_accounts` / `search_all_accounts` for every client.
+2. **MCP client ↔ Worker** — each client still needs its **own** OAuth session to the Worker. That session does *not* re-link Google; it unlocks the tools for that client.
+
+Leave **MCP OAuth client ID / secret empty** everywhere. Clients register themselves.
+
+### Efficient multi-client pattern
+
+**Link Google accounts once, in one place. Point every other client at default `/mcp` only.**
+
+| Role | What to configure | Why |
+| :-- | :-- | :-- |
+| **Account linker** (pick one) | One labeled path per Google mailbox (`/mcp`, `/mcp/personal`, `/mcp/work`, …) | Writes each mailbox into the Worker registry |
+| **Every other MCP client** | A single entry → `https://<your-host>/mcp` | Reuses the same registry; no second Google consent tour |
+
+Recommended linker on macOS desktop: **Claude Desktop**, because its Connectors UI makes per-path Google consent obvious. Claude Code also works as the linker (`claude mcp add` once per label). Do **not** repeat five Google links in omp, OpenCode, Claude Code, *and* Desktop.
+
+After two or more mailboxes are on the Worker:
+
+```
+list_accounts → set_account_alias("…") on each session → search_all_accounts("newer_than:7d")
+```
+
+### Client recipes
+
+Replace `<your-host>` with your Worker hostname (for example `gmail-mcp-plus.example.workers.dev`).
+
+#### Claude Code
+
+Native HTTP transport — preferred when available:
+
+```sh
+# Default only, if another client already linked the Google accounts:
+claude mcp add --transport http gmail https://<your-host>/mcp
+
+# Or use Claude Code as the linker (one path per mailbox):
+claude mcp add --transport http gmail          https://<your-host>/mcp
+claude mcp add --transport http gmail-personal https://<your-host>/mcp/personal
+claude mcp add --transport http gmail-work     https://<your-host>/mcp/work
+```
+
+Then run `/mcp` and complete browser OAuth **one server at a time**.
+
+#### OpenCode
+
+`~/.config/opencode/opencode.json` (or project config):
+
+```json
+{
+  "mcp": {
+    "gmail": {
+      "type": "remote",
+      "url": "https://<your-host>/mcp",
+      "enabled": true
+    }
+  }
+}
+```
+
+One entry is enough when accounts are already on the Worker.
+
+#### omp
+
+`~/.omp/agent/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "type": "http",
+      "url": "https://<your-host>/mcp"
+    }
+  }
+}
+```
+
+Auth happens on first tool use. Again: default `/mcp` only unless omp is the intentional linker.
+
+#### Claude Desktop (macOS) — important
+
+As of current Claude Desktop builds, **`"type": "http"` entries in `claude_desktop_config.json` are invalid and silently skipped** (check `~/Library/Logs/Claude/main.log` for `Skipped invalid MCP server config entries`). Remote Workers must be bridged with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) over stdio.
+
+Config path: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://<your-host>/mcp", "18101", "--auth-timeout", "180"]
+    },
+    "gmail-personal": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://<your-host>/mcp/personal", "18102", "--auth-timeout", "180"]
+    },
+    "gmail-work": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://<your-host>/mcp/work", "18103", "--auth-timeout", "180"]
+    }
+  }
+}
+```
+
+Rules that matter:
+
+| Rule | Detail |
+| :-- | :-- |
+| Unique callback ports | Each `mcp-remote` instance needs its own port (`18101`, `18102`, …). Parallel bridges sharing a port break OAuth callbacks. |
+| One OAuth at a time | Desktop launches every server on startup. If several need auth, they race and hit the ~60s init timeout. Add **one** server (or pre-auth via CLI), quit Desktop fully (`Cmd+Q`), reopen, finish that browser flow, then add the next. |
+| Pre-auth from a terminal (optional) | `npx -y mcp-remote https://<your-host>/mcp/personal 18102 --auth-timeout 180` — complete the browser flow, then start Desktop so tokens already exist under `~/.mcp-auth/`. |
+| Stale locks | If auth hangs: `rm -f ~/.mcp-auth/mcp-remote-*/*_lock.json`, then retry **one** bridge. |
+| Logs | `~/Library/Logs/Claude/mcp-server-<name>.log` and `main.log`. Success looks like `Proxy established` then `tools/list`. |
+
+Use absolute `npx` if Desktop's PATH is thin (for example `/Users/<you>/.local/bin/npx` or `/usr/local/bin/npx`).
+
+### Checklist for a future agent
+
+1. Confirm the Worker is up: `https://<your-host>/` serves the setup guide.
+2. Decide the **linker** client; configure labeled `/mcp/<label>` paths only there.
+3. Configure omp / OpenCode / Claude Code / others with **only** `https://<your-host>/mcp`.
+4. Never put MCP client ID/secret into connector dialogs — leave blank.
+5. For Claude Desktop, never use `"type": "http"`; use `mcp-remote` + unique ports + sequential auth.
+6. After ≥2 Google accounts exist on the Worker: `list_accounts`, `set_account_alias`, then `search_all_accounts`.
+7. Do not re-run the five-account Google consent flow for every MCP client.
+
+### Common failure modes
+
+| Symptom | Cause | Fix |
+| :-- | :-- | :-- |
+| Desktop Connectors show nothing / Cloudflare-like entries "not connected" | `"type": "http"` in `claude_desktop_config.json` skipped | Switch to `mcp-remote` stdio bridges |
+| `Authentication required… Timed out after 60000ms` on several servers | Parallel OAuth + port collision | Auth one label at a time; unique ports; clear `*_lock.json` |
+| Browser "site can't be reached" on `localhost:<port>/oauth/callback` | Wrong port or bridge already dead | Match the port in config; restart only that bridge |
+| Client connected but `search_all_accounts` sees one mailbox | Other Google accounts never linked on the Worker | Finish Google consent on each `/mcp/<label>` in the linker client |
+| Every client asks for Google again | Treating client↔Worker OAuth as account linking | Link Google once on labeled paths; other clients only need Worker OAuth to `/mcp` |
 
 ---
 
