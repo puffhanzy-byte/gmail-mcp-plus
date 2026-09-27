@@ -8,6 +8,7 @@ import {
   forwardSubject,
   gmailFetch,
   headerValue,
+  parseAddresses,
   quoteHtml,
   quotePlain,
   replyRecipients,
@@ -193,20 +194,17 @@ async function send(env: Env, accessToken: string, request: Extract<GatewayReque
   return { ok: true, message: summarizeMessage(result) };
 }
 
-async function reply(env: Env, accessToken: string, request: Extract<GatewayRequest, { operation: "reply" }>) {
+async function reply(env: Env, accessToken: string, request: Extract<GatewayRequest, { operation: "reply" }>, self: string) {
   const original = await message(env, accessToken, request.messageId);
-  const from = parseHeaderAddresses(headerValue(original, "From"));
-  const to = parseHeaderAddresses(headerValue(original, "To"));
-  const cc = parseHeaderAddresses(headerValue(original, "Cc"));
-  const replyTo = parseHeaderAddresses(headerValue(original, "Reply-To"));
-  const self = [headerValue(original, "Delivered-To")].filter(Boolean);
-  const recipients = replyRecipients({ self, from, to, cc, replyTo });
+  const from = parseAddresses(headerValue(original, "From"));
+  const to = parseAddresses(headerValue(original, "To"));
+  const cc = parseAddresses(headerValue(original, "Cc"));
+  const replyTo = parseAddresses(headerValue(original, "Reply-To"));
+  const recipients = replyRecipients({ self: [self], from, to, cc, replyTo });
   const originalBody = truncate(extractBody(original.payload) || "", MAX_BODY);
   const originalHtml = truncate(extractHtmlBody(original.payload) || "", MAX_BODY);
-  const quotedPlain = quotePlain(originalBody, headerValue(original, "From"), headerValue(original, "Date"));
-  const quotedHtml = originalHtml
-    ? quoteHtml(originalHtml, headerValue(original, "From"), headerValue(original, "Date"))
-    : quoteHtml(originalBody, headerValue(original, "From"), headerValue(original, "Date"));
+  const quotedPlain = quotePlain(headerValue(original, "From"), headerValue(original, "Date"), originalBody);
+  const quotedHtml = quoteHtml(headerValue(original, "From"), headerValue(original, "Date"), originalHtml || originalBody);
   const raw = buildRfc822({
     to: recipients.to.join(", "),
     cc: recipients.cc.length ? recipients.cc.join(", ") : undefined,
@@ -250,13 +248,6 @@ async function forward(env: Env, accessToken: string, request: Extract<GatewayRe
     body: JSON.stringify({ raw: b64urlEncode(raw) }),
   });
   return { ok: true, message: summarizeMessage(result) };
-}
-
-function parseHeaderAddresses(value: string): string[] {
-  return value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
 }
 
 async function drafts(env: Env, accessToken: string, request: Extract<GatewayRequest, { operation: "drafts" }>) {
@@ -352,7 +343,7 @@ export async function artooGateway(request: Request, env: Env): Promise<Response
       case "send":
         return json(await send(env, accessToken, input));
       case "reply":
-        return json(await reply(env, accessToken, input));
+        return json(await reply(env, accessToken, input, current.email));
       case "forward":
         return json(await forward(env, accessToken, input));
       case "drafts":
