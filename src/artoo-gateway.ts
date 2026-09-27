@@ -272,6 +272,19 @@ async function drafts(env: Env, accessToken: string, request: Extract<GatewayReq
     return { ok: true };
   }
 
+  if (action === "send") {
+    const id = validateText(request.draftId, "draftId", 500);
+    const result = await gmailFetch<GmailMessage>(
+      accessToken,
+      `/drafts/${encodeURIComponent(id)}/send`,
+      {
+        method: "POST",
+        body: JSON.stringify({ id }),
+      },
+    );
+    return { ok: true, message: summarizeMessage(result) };
+  }
+
   const to = validateText(request.to, "to", 8_000);
   const subject = validateText(request.subject, "subject", 2_000);
   const body = validateText(request.body, "body");
@@ -283,15 +296,6 @@ async function drafts(env: Env, accessToken: string, request: Extract<GatewayReq
       body: JSON.stringify({ message: { raw: b64urlEncode(raw) } }),
     });
     return { ok: true, draft: result };
-  }
-
-  if (action === "send") {
-    const id = validateText(request.draftId, "draftId", 500);
-    const result = await gmailFetch<GmailMessage>(accessToken, `/drafts/${encodeURIComponent(id)}/send`, {
-      method: "POST",
-      body: JSON.stringify({ id }),
-    });
-    return { ok: true, message: summarizeMessage(result) };
   }
 
   throw new Error("unsupported drafts action");
