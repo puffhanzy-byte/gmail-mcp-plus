@@ -57,6 +57,7 @@ import { GoogleHandler } from "./google-handler";
 import { findAccount, getAccount, listAccounts, putAccount } from "./registry";
 import { parseListUnsubscribe } from "./unsubscribe";
 import { BodyTooLarge, type Props, readBoundedBody, refreshGoogleToken } from "./utils";
+import { artooGateway } from "./artoo-gateway";
 
 type TokenCache = { accessToken: string; expiresAt: number };
 
@@ -2567,6 +2568,9 @@ export default {
 		const path = new URL(request.url).pathname;
 		if (path.startsWith("/upload/")) {
 			return uploadRoute(request, env, path);
+		}
+		if (path === "/artoo") {
+			return artooGateway(request, env);
 		}
 		const limit = request.method === "POST" ? bodyLimitFor(path) : null;
 		if (limit === null) {
