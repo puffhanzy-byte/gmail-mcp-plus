@@ -222,7 +222,7 @@ async function reply(accessToken: string, request: Extract<GatewayRequest, { ope
 }
 
 async function forward(accessToken: string, request: Extract<GatewayRequest, { operation: "forward" }>) {
-  const original = await message(env, accessToken, request.messageId);
+  const original = await message(accessToken, request.messageId);
   const originalBody = truncate(extractBody(original.payload) || "", MAX_BODY);
   const originalHtml = truncate(extractHtmlBody(original.payload) || "", MAX_BODY);
   const fields = {
@@ -323,7 +323,7 @@ export async function artooGateway(request: Request, env: Env): Promise<Response
       case "search":
         return json(await search(accessToken, input));
       case "read": {
-        const item = await message(env, accessToken, input.messageId);
+        const item = await message(accessToken, input.messageId);
         return json({ ok: true, message: messageView(item, true) });
       }
       case "thread": {
