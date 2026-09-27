@@ -33,7 +33,7 @@ type Env = {
   COOKIE_ENCRYPTION_KEY: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
-  ARTOO_GATEWAY_SECRET: string;
+  ARTOO_GATEWAY_SECRET?: string;
 };
 
 type GatewayRequest =
@@ -130,7 +130,7 @@ async function token(env: Env, refreshToken: string): Promise<string> {
   return refreshed.access_token;
 }
 
-async function message(env: Env, accessToken: string, id: string): Promise<GmailMessage> {
+async function message(accessToken: string, id: string): Promise<GmailMessage> {
   validateText(id, "messageId", 500);
   return gmailFetch<GmailMessage>(
     accessToken,
@@ -149,7 +149,7 @@ function messageView(m: GmailMessage, includeBody: boolean) {
   return result;
 }
 
-async function search(env: Env, accessToken: string, request: Extract<GatewayRequest, { operation: "search" }>) {
+async function search(accessToken: string, request: Extract<GatewayRequest, { operation: "search" }>) {
   const query = validateText(request.query, "query", 2_000);
   const maxResults = Math.min(Math.max(request.maxResults ?? 5, 1), MAX_RESULTS);
   const params = new URLSearchParams({ q: query, maxResults: String(maxResults) });
@@ -175,7 +175,7 @@ async function search(env: Env, accessToken: string, request: Extract<GatewayReq
   return { ok: true, resultSizeEstimate: list.resultSizeEstimate, nextPageToken: list.nextPageToken, messages: results };
 }
 
-async function send(env: Env, accessToken: string, request: Extract<GatewayRequest, { operation: "send" }>) {
+async function send(accessToken: string, request: Extract<GatewayRequest, { operation: "send" }>) {
   const to = validateText(request.to, "to", 8_000);
   const subject = validateText(request.subject, "subject", 2_000);
   const body = validateText(request.body, "body");
@@ -194,8 +194,8 @@ async function send(env: Env, accessToken: string, request: Extract<GatewayReque
   return { ok: true, message: summarizeMessage(result) };
 }
 
-async function reply(env: Env, accessToken: string, request: Extract<GatewayRequest, { operation: "reply" }>, self: string) {
-  const original = await message(env, accessToken, request.messageId);
+async function reply(accessToken: string, request: Extract<GatewayRequest, { operation: "reply" }>, self: string) {
+  const original = await message(accessToken, request.messageId);
   const from = parseAddresses(headerValue(original, "From"));
   const to = parseAddresses(headerValue(original, "To"));
   const cc = parseAddresses(headerValue(original, "Cc"));
@@ -203,8 +203,8 @@ async function reply(env: Env, accessToken: string, request: Extract<GatewayRequ
   const recipients = replyRecipients({ self: [self], from, to, cc, replyTo });
   const originalBody = truncate(extractBody(original.payload) || "", MAX_BODY);
   const originalHtml = truncate(extractHtmlBody(original.payload) || "", MAX_BODY);
-  const quotedPlain = quotePlain(headerValue(original, "From"), headerValue(original, "Date"), originalBody);
-  const quotedHtml = quoteHtml(headerValue(original, "From"), headerValue(original, "Date"), originalHtml || originalBody);
+  const quotedPlain = quotePlain(headerValue(original, "From") ?? "", headerValue(original, "Date") ?? "", originalBody);
+  const quotedHtml = quoteHtml(headerValue(original, "From") ?? "", headerValue(original, "Date") ?? "", originalHtml || originalBody);
   const raw = buildRfc822({
     to: recipients.to.join(", "),
     cc: recipients.cc.length ? recipients.cc.join(", ") : undefined,
@@ -221,7 +221,7 @@ async function reply(env: Env, accessToken: string, request: Extract<GatewayRequ
   return { ok: true, message: summarizeMessage(result) };
 }
 
-async function forward(env: Env, accessToken: string, request: Extract<GatewayRequest, { operation: "forward" }>) {
+async function forward(accessToken: string, request: Extract<GatewayRequest, { operation: "forward" }>) {
   const original = await message(env, accessToken, request.messageId);
   const originalBody = truncate(extractBody(original.payload) || "", MAX_BODY);
   const originalHtml = truncate(extractHtmlBody(original.payload) || "", MAX_BODY);
@@ -250,7 +250,7 @@ async function forward(env: Env, accessToken: string, request: Extract<GatewayRe
   return { ok: true, message: summarizeMessage(result) };
 }
 
-async function drafts(env: Env, accessToken: string, request: Extract<GatewayRequest, { operation: "drafts" }>) {
+async function drafts(accessToken: string, request: Extract<GatewayRequest, { operation: "drafts" }>) {
   const action = request.action ?? "list";
   if (action === "list") {
     const list = await gmailFetch<DraftList>(accessToken, "/drafts?maxResults=10", {}, 100_000);
@@ -308,19 +308,20 @@ export async function artooGateway(request: Request, env: Env): Promise<Response
   }
 
   const auth = request.headers.get("authorization") ?? "";
-  if (!auth.startsWith("Bearer ") || !safeEqual(auth.slice(7), env.ARTOO_GATEWAY_SECRET)) {
+  if (!env.ARTOO_GATEWAY_SECRET || !auth.startsWith("Bearer ") || !safeEqual(auth.slice(7), env.ARTOO_GATEWAY_SECRET)) {
     return unauthorized();
   }
 
   try {
     const input = await readJson(request);
     const current = await account(env);
+    if (!current) throw new Error("no Gmail account is connected to Gmail MCP Plus");
     if (!current.refreshToken) throw new Error("connected Gmail account has no refresh token in the registry");
     const accessToken = await token(env, current.refreshToken);
 
     switch (input.operation) {
       case "search":
-        return json(await search(env, accessToken, input));
+        return json(await search(accessToken, input));
       case "read": {
         const item = await message(env, accessToken, input.messageId);
         return json({ ok: true, message: messageView(item, true) });
@@ -345,13 +346,13 @@ export async function artooGateway(request: Request, env: Env): Promise<Response
         return json({ ok: true, threadId, messages });
       }
       case "send":
-        return json(await send(env, accessToken, input));
+        return json(await send(accessToken, input));
       case "reply":
-        return json(await reply(env, accessToken, input, current.email));
+        return json(await reply(accessToken, input, current.email));
       case "forward":
-        return json(await forward(env, accessToken, input));
+        return json(await forward(accessToken, input));
       case "drafts":
-        return json(await drafts(env, accessToken, input));
+        return json(await drafts(accessToken, input));
       default:
         return json({ ok: false, error: "unsupported operation" }, 400);
     }
